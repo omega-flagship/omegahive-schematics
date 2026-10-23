@@ -1,0 +1,1 @@
+Open (Apache-2.0): OmegaHive schematics: how the platform works, its intended shape, how owners plug in, and what reviewers check.

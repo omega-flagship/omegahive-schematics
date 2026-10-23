@@ -1,0 +1,62 @@
+name: docs
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check links, anchors and mermaid house rules
+        run: python tools/check_docs.py --extract-mermaid "$RUNNER_TEMP/mermaid"
+
+      - name: Render every mermaid block
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -u
+          shopt -s nullglob
+          dir="$RUNNER_TEMP/mermaid"
+          out="$RUNNER_TEMP/rendered"
+          mkdir -p "$dir" "$out"
+          # Chromium on the hosted runner needs --no-sandbox.
+          echo '{"args":["--no-sandbox"]}' > "$RUNNER_TEMP/puppeteer.json"
+          fail=0
+          n=0
+          for f in "$dir"/*.mmd; do
+            n=$((n + 1))
+            name="$(basename "$f")"
+            src="$(awk -F'\t' -v k="$name" '$1 == k {print $2; exit}' "$dir/index.tsv")"
+            line="$(awk -F'\t' -v k="$name" '$1 == k {print $3; exit}' "$dir/index.tsv")"
+            if ! npx -y @mermaid-js/mermaid-cli@11.4.2 -q \
+                -p "$RUNNER_TEMP/puppeteer.json" \
+                -i "$f" -o "$out/${name%.mmd}.svg" > "$RUNNER_TEMP/mmdc.log" 2>&1; then
+              echo "::error file=${src},line=${line},title=mermaid parse error::${src}:${line} does not render"
+              cat "$RUNNER_TEMP/mmdc.log"
+              fail=1
+            fi
+          done
+          echo "rendered $n mermaid blocks"
+          exit $fail
+
+      - name: Keep the rendered diagrams
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-diagrams
+          path: ${{ runner.temp }}/rendered
+          if-no-files-found: ignore
